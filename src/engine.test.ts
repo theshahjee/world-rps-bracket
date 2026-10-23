@@ -10,6 +10,8 @@ import {
   predict,
   readerWinRate,
   sample,
+  simulateMatch,
+  simulateRuns,
   type Profile,
   type Triple,
 } from './engine';
@@ -76,6 +78,33 @@ describe('opponent model', () => {
   it('beats a predictable player almost every time', () => {
     const repeater: Profile = { ...randomProfile, win: [1, 0, 0], tie: [1, 0, 0] };
     expect(bestMatchWinRate(repeater, predict(repeater, 0, 'win'))).toBeCloseTo(1, 9);
+  });
+
+  it('plays out a match between two modelled players', () => {
+    let seed = 1;
+    const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const p = data.profiles[0] as Profile;
+    const state = { profile: p, profileIndex: 0, lastMove: null, lastOutcome: 'win' as const };
+    const first = data.population.first as Triple;
+    let winsA = 0;
+    for (let i = 0; i < 2000; i++) {
+      const m = simulateMatch(state, { ...state }, first, rng);
+      expect(m.throws).toBeGreaterThanOrEqual(1);
+      winsA += m.winner === 0 ? 1 : 0;
+    }
+    // Identical players: each side wins about half.
+    expect(winsA / 2000).toBeGreaterThan(0.45);
+    expect(winsA / 2000).toBeLessThan(0.55);
+  });
+
+  it('Monte Carlo runs follow the geometric law P(reach r) = p^r', () => {
+    let seed = 7;
+    const rng = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    const n = 200_000;
+    const counts = simulateRuns(0.6, n, rng);
+    expect(counts.reduce((a, b) => a + b, 0)).toBe(n);
+    const reached3 = counts.slice(3).reduce((a, b) => a + b, 0) / n;
+    expect(reached3).toBeCloseTo(0.6 ** 3, 2);
   });
 
   it('every real profile is a valid distribution and beatable at 50% or better', () => {

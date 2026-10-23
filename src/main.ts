@@ -16,7 +16,7 @@ import {
   playersLeft,
   predict,
   readerWinRate,
-  sample,
+  simulateRuns,
   type Move,
   type OpponentState,
   type Outcome,
@@ -24,6 +24,17 @@ import {
   type Triple,
 } from './engine';
 import { randomPerson, type Person } from './people';
+import {
+  blockWinner,
+  describeMatch,
+  drawBracket,
+  emptyBracket,
+  playBlock,
+  uniqueEntrants,
+  record,
+  type Bracket,
+  type Entrant,
+} from './bracket';
 
 const profiles = data.profiles as Profile[];
 const pop = data.population;
@@ -112,7 +123,7 @@ const sci = (x: number) => {
 
 const GLYPHS = [
   // rock
-  `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 40c-3-9 2-20 11-23 5-6 15-7 21-2 8 1 13 9 11 17-1 8-7 15-16 16H24c-6 0-10-3-12-8z" fill="currentColor" opacity=".9"/><path d="M24 22c4 3 9 3 13 0M38 30c3 2 7 2 10 0" class="crease" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>`,
+  `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M10 42 17 22l15-9 16 5 7 17-6 14-21 4z" fill="currentColor"/><path class="crease" d="m17 22 13 9 18-13M30 31l-3 22M30 31l19 4" stroke-width="2" fill="none" stroke-linejoin="round"/></svg>`,
   // paper
   `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M16 8h24l10 10v38H16z" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linejoin="round"/><path d="M40 8v10h10M23 30h20M23 38h20M23 46h13" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`,
   // scissors
@@ -120,6 +131,7 @@ const GLYPHS = [
 ];
 
 function setGlyph(target: HTMLElement, move: Move | null) {
+  target.classList.remove('idle');
   target.innerHTML = move === null ? '' : GLYPHS[move];
 }
 
@@ -138,24 +150,151 @@ interface Game {
 let game: Game;
 let shownLeft = WORLD_POPULATION;
 
-function newOpponent(round: number): { opponent: OpponentState; person: Person; lastText: string } {
-  const profileIndex = Math.floor(rng() * profiles.length);
-  const profile = profiles[profileIndex];
-  const person = randomPerson(rng);
-  if (round === 1) {
-    return {
-      person,
-      opponent: { profile, profileIndex, lastMove: null, lastOutcome: 'win' },
-      lastText: `First game for both of you. In the study, ${pct(firstMoves[1], 0)} of opening throws were paper.`,
-    };
-  }
-  const lastMove = sample(profile.marg, rng);
-  const beaten = randomPerson(rng);
-  return {
-    person,
-    opponent: { profile, profileIndex, lastMove, lastOutcome: 'win' },
-    lastText: `Record ${round - 1}–0. Last game: won with ${MOVE_NAMES[lastMove]} against ${beaten.name} (${beaten.country}).`,
+// Your corner of the bracket: you plus the players you could meet over the next few rounds.
+// Their matches against each other are simulated, so your opponent is whoever really wins
+// the neighbouring branch.
+let corner: Bracket;
+let cornerStart = 1;
+let oppLeaf = 1;
+let matchThrows = 0;
+const CORNER_DEPTH = 4;
+
+function newCorner(round: number) {
+  const depth = Math.min(CORNER_DEPTH, TOTAL_ROUNDS - round + 1);
+  const you: Entrant = {
+    person: { name: 'You', country: '', flag: '' },
+    profile: popProfile,
+    profileIndex: -1,
+    you: true,
+    lastMove: null,
   };
+  const leaves = [you, ...uniqueEntrants(2 ** depth - 1, profiles, rng, round - 1)];
+  cornerPick = null;
+  corner = emptyBracket(leaves);
+  cornerStart = round;
+  for (let j = 0; j < depth; j++) playBlock(corner, 2 ** j, 2 ** j, firstMoves, rng);
+}
+
+function newOpponent(round: number): { opponent: OpponentState; person: Person; lastText: string } {
+  if (round === 1 || round - cornerStart >= corner.levels.length) newCorner(round);
+  const j = round - cornerStart;
+  oppLeaf = j === 0 ? 1 : blockWinner(corner, j - 1, 1)!;
+  matchThrows = 0;
+  const entrant = corner.leaves[oppLeaf];
+  const opponent: OpponentState = {
+    profile: entrant.profile,
+    profileIndex: entrant.profileIndex,
+    lastMove: entrant.lastMove,
+    lastOutcome: 'win',
+  };
+  let lastText: string;
+  if (entrant.lastMove === null) {
+    lastText = `First game for both of you. In the study, ${pct(firstMoves[1], 0)} of opening throws were paper.`;
+  } else if (j === 0) {
+    const beaten = randomPerson(rng);
+    lastText = `Record ${round - 1}–0. Last game: won with ${MOVE_NAMES[entrant.lastMove]} against ${beaten.name} (${beaten.country}).`;
+  } else {
+    const m = corner.levels[j - 1][1]!;
+    const loser = corner.leaves[m.loser].person;
+    lastText = `Record ${round - 1}–0. Just won the next branch over, beating ${loser.name} (${loser.country}) with ${MOVE_NAMES[m.move]}.`;
+  }
+  return { opponent, person: entrant.person, lastText };
+}
+
+function renderCorner(revealLevel: number) {
+  const n = corner.leaves.length;
+  const before = playersLeft(cornerStart - 1);
+  const endRound = cornerStart + corner.levels.length - 1;
+  $('corner-note').replaceChildren(
+    rich(
+      `Rounds ${cornerStart}–${endRound}: {${n}} of the {${fmt(before)}} players still in. ` +
+        (cornerStart > 1 ? `Everyone here has already won ${cornerStart - 1} games. ` : '') +
+        `The whole bracket is ${fmt(Math.ceil(before / n))} corners like this one, halving at the same time.`,
+    ),
+  );
+  cornerReveal = revealLevel;
+  drawBracket($('corner-svg') as unknown as SVGSVGElement, corner, {
+    revealLevel,
+    rootLabel: endRound === TOTAL_ROUNDS ? 'Champion' : `Round ${endRound + 1}`,
+    picked: cornerPick,
+    onPick: (i) => {
+      cornerPick = cornerPick === i ? null : i;
+      renderCorner(cornerReveal);
+    },
+  });
+  renderScout($('corner-scout'), corner, cornerPick, revealLevel, () => {
+    cornerPick = null;
+    renderCorner(cornerReveal);
+  });
+}
+
+let cornerPick: number | null = null;
+let cornerReveal = 0;
+
+/** Status of a leaf given what has been revealed: still in, or out in which round of the bracket. */
+function leafStatus(b: Bracket, leaf: number, revealLevel: number): string {
+  for (let j = 0; j < Math.min(revealLevel, b.levels.length); j++) {
+    for (const m of b.levels[j]) {
+      if (m?.loser === leaf) return `Knocked out by ${b.leaves[m.winner].you ? 'you' : b.leaves[m.winner].person.name} with ${MOVE_NAMES[m.move]}`;
+    }
+  }
+  const root = b.levels[b.levels.length - 1][0];
+  if (revealLevel >= b.levels.length && root?.winner === leaf) return 'Won this bracket';
+  return 'Still in';
+}
+
+function renderScout(box: HTMLElement, b: Bracket, leaf: number | null, revealLevel: number, close: () => void) {
+  if (leaf === null) {
+    box.hidden = true;
+    box.replaceChildren();
+    return;
+  }
+  const e = b.leaves[leaf];
+  const head = el('div', 'scout-head');
+  head.append(el('h3', undefined, e.you ? 'You' : `${e.person.flag} ${e.person.name}`));
+  const closeBtn = el('button', 'close', 'Close');
+  closeBtn.type = 'button';
+  closeBtn.addEventListener('click', close);
+  head.append(closeBtn);
+  box.replaceChildren(head);
+  box.hidden = false;
+  if (e.you) {
+    box.append(
+      el('p', 'scout-sub', leafStatus(b, leaf, revealLevel)),
+      el('p', 'scout-sub', `So far: ${game.wins} winning throws and ${game.ties} ties. Your habits are the one thing the model can't see.`),
+    );
+    return;
+  }
+  box.append(el('p', 'scout-sub', `${e.person.country}. ${leafStatus(b, leaf, revealLevel)}.`));
+  const grid = el('div', 'scout-grid');
+  const groups: [string, Triple][] = [
+    ['After a win', e.profile.win],
+    ['After a tie', e.profile.tie],
+    ['After a loss', e.profile.lose],
+  ];
+  for (const [title, row] of groups) {
+    const g = el('div');
+    g.append(
+      el('h4', undefined, title),
+      barRow('Stay', row[0], 0.6, 1 / 3),
+      barRow('Upgrade', row[1], 0.6, 1 / 3),
+      barRow('Downgrade', row[2], 0.6, 1 / 3),
+    );
+    grid.append(g);
+  }
+  const fav = e.profile.marg.indexOf(Math.max(...e.profile.marg));
+  box.append(
+    grid,
+    (() => {
+      const dl = el('dl', 'eqs');
+      dl.append(
+        eqRow('Throws observed in the study', `{${e.profile.n}}, favourite {${MOVE_NAMES[fav]}} at ${pct(e.profile.marg[fav])}`),
+        eqRow('Your match win chance reading their habits', `V = {${pct(readerWinRate(e.profile))}}`),
+        eqRow('Countering average habits instead', `{${pct(habitReaderWinRate(e.profile, popProfile))}}`),
+      );
+      return dl;
+    })(),
+  );
 }
 
 function startGame() {
@@ -210,8 +349,8 @@ function renderRound(lastText: string) {
   $('who-them').textContent = game.person.name.split(' ')[0];
 
   for (const id of ['hand-you', 'hand-them']) $(id).classList.remove('won', 'lost', 'pop');
-  setGlyph($('glyph-you'), null);
-  setGlyph($('glyph-them'), null);
+  setGlyph($('glyph-you'), 0);
+  setGlyph($('glyph-them'), 0);
   setVerdict('', 'Pick your throw.');
   setThrowsEnabled(true);
   $('next').hidden = true;
@@ -219,6 +358,9 @@ function renderRound(lastText: string) {
   renderLedger();
   renderPrediction();
   renderLadder();
+  renderCorner(r - cornerStart);
+  updateMinibar();
+  for (const g of ['glyph-you', 'glyph-them']) $(g).classList.add('idle');
 }
 
 function setVerdict(kind: Outcome | '', text: string) {
@@ -367,9 +509,33 @@ function renderLadder(lostAt?: number) {
 
 // ---------- play ----------
 
+let counting = false;
+const CHANT = ['Rock…', 'Paper…', 'Scissors…'];
+
+/** A quick "rock, paper, scissors, shoot" before the reveal. Skipped for reduced motion. */
 function play(mine: Move) {
-  if (!game || game.phase !== 'choose') return;
+  if (!game || game.phase !== 'choose' || counting) return;
+  if (reducedMotion.matches) return resolve(mine);
+  counting = true;
+  setThrowsEnabled(false);
+  const stage = $('stage');
+  for (const id of ['hand-you', 'hand-them']) $(id).classList.remove('won', 'lost', 'pop');
+  setGlyph($('glyph-you'), 0);
+  setGlyph($('glyph-them'), 0);
+  stage.classList.add('counting');
+  const verdict = $('verdict');
+  verdict.className = 'verdict chant';
+  CHANT.forEach((word, i) => setTimeout(() => (verdict.textContent = word), i * 190));
+  setTimeout(() => {
+    stage.classList.remove('counting');
+    counting = false;
+    resolve(mine);
+  }, CHANT.length * 190);
+}
+
+function resolve(mine: Move) {
   const theirs = opponentMove(game.opponent, firstMoves, rng);
+  matchThrows++;
   const result = outcomeOf(mine, theirs);
 
   const you = $('hand-you');
@@ -391,6 +557,7 @@ function play(mine: Move) {
     game.ties++;
     setVerdict('tie', `Tie, both ${MOVE_NAMES[mine]}. Throw again. ${name} just tied, so their tie habits apply now.`);
     $('opp-last').textContent = `Just tied with ${MOVE_NAMES[theirs]}.`;
+    setThrowsEnabled(true);
     renderLedger();
     renderPrediction();
     return;
@@ -398,6 +565,8 @@ function play(mine: Move) {
 
   if (result === 'win') {
     game.wins++;
+    record(corner, game.round - cornerStart, 0, oppLeaf, mine, matchThrows);
+    renderCorner(game.round - cornerStart + 1);
     you.classList.add('won');
     them.classList.add('lost');
     if (game.round === TOTAL_ROUNDS) {
@@ -415,6 +584,7 @@ function play(mine: Move) {
     );
     setThrowsEnabled(false);
     animateCount(left);
+    updateMinibar();
     $('progress-bar').style.width = `${(game.round / TOTAL_ROUNDS) * 100}%`;
     const next = $<HTMLButtonElement>('next');
     next.textContent = `Play round ${game.round + 1}`;
@@ -423,11 +593,14 @@ function play(mine: Move) {
     return;
   }
 
+  record(corner, game.round - cornerStart, oppLeaf, 0, theirs, matchThrows);
+  renderCorner(game.round - cornerStart + 1);
   them.classList.add('won');
   you.classList.add('lost');
   game.phase = 'over';
   setThrowsEnabled(false);
   setVerdict('lose', `${MOVE_NAMES[theirs]} beats ${MOVE_NAMES[mine]}. ${game.person.name} knocks you out.`);
+  updateMinibar();
   finish(false);
 }
 
@@ -452,6 +625,54 @@ function saveBest(wins: number) {
 }
 
 let shareText = '';
+const canNativeShare = typeof navigator.share === 'function' && matchMedia('(pointer: coarse)').matches;
+
+/** Copy through a hidden textarea. It must live inside the open dialog, because a modal makes the rest of the page inert. */
+function legacyCopy(text: string): boolean {
+  const area = el('textarea');
+  area.value = text;
+  area.setAttribute('readonly', '');
+  area.className = 'offscreen';
+  $('end-dialog').append(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand('copy');
+  } catch {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+async function shareResult() {
+  const button = $('share');
+  if (canNativeShare) {
+    try {
+      await navigator.share({ text: shareText });
+      return;
+    } catch (err) {
+      if ((err as DOMException).name === 'AbortError') return; // the viewer closed the share sheet
+    }
+  }
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(shareText);
+    copied = true;
+  } catch {
+    copied = legacyCopy(shareText);
+  }
+  if (copied) {
+    button.textContent = 'Copied';
+    return;
+  }
+  // Last resort: show the text, selected, so the viewer can copy it themselves.
+  const box = $<HTMLTextAreaElement>('share-text');
+  box.value = shareText;
+  box.hidden = false;
+  box.select();
+  button.textContent = 'Select and copy the text above';
+}
 
 function finish(champion: boolean) {
   const k = champion ? TOTAL_ROUNDS : game.round - 1;
@@ -475,6 +696,14 @@ function finish(champion: boolean) {
       : `You won ${k} in a row and outlasted ${fmt(beaten)} people, ${pct(beaten / WORLD_POPULATION, k > 10 ? 4 : 2)} of the planet.` +
         (k > previousBest ? ' That is your best run so far.' : ` Your best is ${Math.max(previousBest, k)}.`);
   $('end-eqs').replaceChildren(
+    ...(k === 0
+      ? [
+          eqRow('Chance of losing round 1 at random', `{½}, the same as everyone else`),
+          eqRow('Rounds that were left', `{${TOTAL_ROUNDS}}`),
+        ]
+      : []),
+  );
+  if (k > 0) $('end-eqs').replaceChildren(
     eqRow('Probability of this run by pure luck', `2${sup(-k)} = {${sci(0.5 ** k)}}, 1 in ${formatOneIn(0.5 ** k)}`),
     eqRow('Share of the field you outlasted', `1 − 2${sup(-k)} = {${pct(1 - 0.5 ** k, k > 10 ? 6 : 2)}}`),
     eqRow('Rounds that were left', `${TOTAL_ROUNDS} − ${k} = {${TOTAL_ROUNDS - k}}`),
@@ -482,7 +711,8 @@ function finish(champion: boolean) {
   shareText = champion
     ? `I won all 33 rounds of the World RPS Bracket and beat 8.32 billion people. ${location.href}`
     : `I won ${k} straight in the World RPS Bracket and outlasted ${fmt(beaten)} people (luck odds: 1 in ${formatOneIn(0.5 ** k)}). ${location.href}`;
-  $('share').textContent = 'Copy result';
+  $('share').textContent = canNativeShare ? 'Share result' : 'Copy result';
+  $('share-text').hidden = true;
   const dialog = $<HTMLDialogElement>('end-dialog');
   setTimeout(() => dialog.showModal(), reducedMotion.matches ? 0 : 650);
 }
@@ -626,9 +856,221 @@ function renderStudies() {
   );
 }
 
+// ---------- sticky score bar and theme ----------
+
+function updateMinibar() {
+  if (!game) return;
+  $('mb-round').textContent = String(game.round);
+  $('mb-left').textContent = fmt(game.phase === 'won' ? playersLeft(game.round) : playersLeft(game.round - 1));
+  $('mb-opp').textContent = game.phase === 'over' ? 'Run over' : `vs ${game.person.flag} ${game.person.name}`;
+}
+
+function watchScoreline() {
+  const bar = $('minibar');
+  const target = document.querySelector('.scoreline')!;
+  new IntersectionObserver(([entry]) => {
+    const above = entry.boundingClientRect.top < 0;
+    bar.classList.toggle('show', !entry.isIntersecting && above);
+  }).observe(target);
+}
+
+const THEME_KEY = 'world-rps-theme';
+function applyTheme(theme: string | null) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  $('theme').setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+  $('theme').textContent = dark ? '☀' : '☾';
+}
+
+function initTheme() {
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem(THEME_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+  applyTheme(saved);
+  $('theme').addEventListener('click', () => {
+    const dark = document.documentElement.dataset.theme
+      ? document.documentElement.dataset.theme === 'dark'
+      : matchMedia('(prefers-color-scheme: dark)').matches;
+    const next = dark ? 'light' : 'dark';
+    applyTheme(next);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      /* storage unavailable */
+    }
+    // Charts read colours from CSS, but redraw so nothing keeps stale state.
+    renderMonteCarlo();
+  });
+}
+
+// ---------- simulations ----------
+
+let simBracket: Bracket | null = null;
+let simReveal = 0;
+let simTimer = 0;
+let simPick: number | null = null;
+let simPlaying = false;
+
+function newSimField() {
+  clearTimeout(simTimer);
+  simPlaying = false;
+  simBracket = emptyBracket(uniqueEntrants(32, profiles, rng, 0));
+  playBlock(simBracket, 0, 32, firstMoves, rng);
+  simReveal = 0;
+  simPick = null;
+  $<HTMLButtonElement>('sim-run').disabled = false;
+  renderSim();
+}
+
+function stepSim() {
+  if (!simBracket || simReveal >= simBracket.levels.length) return;
+  simReveal++;
+  renderSim();
+}
+
+function renderSim() {
+  const svgEl = $('sim-svg') as unknown as SVGSVGElement;
+  if (!simBracket) return;
+  drawBracket(svgEl, simBracket, {
+    revealLevel: simReveal,
+    rootLabel: 'Champion',
+    picked: simPick,
+    onPick: (i) => {
+      simPick = simPick === i ? null : i;
+      renderSim();
+    },
+  });
+  renderScout($('sim-scout'), simBracket, simPick, simReveal, () => {
+    simPick = null;
+    renderSim();
+  });
+  const done = simReveal >= simBracket.levels.length;
+  $<HTMLButtonElement>('sim-step').disabled = done || simPlaying;
+  $('sim-run').textContent = done ? 'Play a new bracket' : 'Play it out';
+  const depth = simBracket.levels.length;
+  const left = 32 / 2 ** simReveal;
+  $('sim-status').textContent =
+    simReveal === 0 ? '32 players, round 1 about to start' : simReveal < depth ? `After round ${simReveal}: ${left} left` : 'Done: 1 champion';
+
+  const played = simBracket.levels.slice(0, simReveal).flat().filter((m) => m !== null);
+  const throws = played.reduce((t, m) => t + m.throws, 0);
+  const ties = throws - played.length;
+  const rows = [
+    eqRow('Players left', `N${sub(simReveal)} = 32 / 2${sup(simReveal)} = {${left}}`),
+    eqRow('Matches played', `{${played.length}} of 31 (every match removes exactly one player)`),
+    eqRow('Throws, including replayed ties', `{${throws}}, of which {${ties}} were ties` + (throws ? ` (${pct(ties / throws)})` : '')),
+  ];
+  if (simReveal === depth) {
+    const champ = simBracket.leaves[simBracket.levels[depth - 1][0]!.winner];
+    rows.push(
+      eqRow('Champion', `{${champ.person.flag} ${champ.person.name}}, ${champ.person.country}`),
+      eqRow('Chance of that by coin flips alone', `(½)${sup(5)} = {1 in 32}`),
+      eqRow('Same path for the world', `(½)${sup(33)} = {1 in 8.59 billion}`),
+    );
+  } else if (played.length) {
+    rows.push(eqRow('Latest result', describeMatch(simBracket, played[played.length - 1])));
+  }
+  $('sim-eqs').replaceChildren(...rows);
+}
+
+function runSim() {
+  if (!simBracket || simReveal >= simBracket.levels.length) newSimField();
+  const button = $<HTMLButtonElement>('sim-run');
+  button.disabled = true;
+  simPlaying = true;
+  const tick = () => {
+    stepSim();
+    if (simReveal < simBracket!.levels.length) simTimer = window.setTimeout(tick, reducedMotion.matches ? 0 : 900);
+    else {
+      simPlaying = false;
+      button.disabled = false;
+      renderSim();
+    }
+  };
+  renderSim();
+  simTimer = window.setTimeout(tick, reducedMotion.matches ? 0 : 400);
+}
+
+const MC_PLAYERS = 100_000;
+let mcCounts: number[] | null = null;
+let mcP = 0.6;
+
+function renderMonteCarlo() {
+  const svgEl = $('mc-chart') as unknown as SVGSVGElement;
+  const width = Math.max(300, Math.round(svgEl.parentElement!.clientWidth - 24));
+  const height = width < 480 ? 220 : 260;
+  svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svgEl.setAttribute('height', String(height));
+  svgEl.replaceChildren();
+  if (!mcCounts) return;
+
+  const p = mcP;
+  const n = MC_PLAYERS;
+  const theory = (r: number) => (r < TOTAL_ROUNDS ? n * p ** r * (1 - p) : n * p ** TOTAL_ROUNDS);
+  let maxR = 0;
+  for (let r = 0; r <= TOTAL_ROUNDS; r++) if (mcCounts[r] > 0 || theory(r) >= 0.5) maxR = r;
+  maxR = Math.min(TOTAL_ROUNDS, Math.max(maxR, 6));
+
+  const L = 44, R = 10, T = 10, B = 34;
+  const yMax = Math.ceil(Math.log10(n));
+  const X = (r: number) => L + ((r + 0.5) / (maxR + 1)) * (width - L - R);
+  const yMin = -0.35; // a little below 10^0 so a count of 1 still gets a visible bar
+  const Y = (v: number) => T + (1 - (Math.log10(Math.max(v, 1)) - yMin) / (yMax - yMin)) * (height - T - B);
+  const base = height - B;
+  const barW = Math.max(2, ((width - L - R) / (maxR + 1)) * 0.7);
+
+  for (let e = 0; e <= yMax; e++) {
+    svg('line', { x1: L, x2: width - R, y1: Y(10 ** e), y2: Y(10 ** e), class: 'grid' }, svgEl);
+    const t = svg('text', { x: L - 6, y: Y(10 ** e) + 4, 'text-anchor': 'end' }, svgEl);
+    t.textContent = e === 0 ? '1' : '10';
+    if (e > 0) svg('tspan', { dy: -5, 'font-size': 9 }, t).textContent = String(e);
+  }
+  const tickEvery = maxR > 20 ? 5 : maxR > 10 ? 2 : 1;
+  for (let r = 0; r <= maxR; r += tickEvery) {
+    const t = svg('text', { x: X(r), y: height - B + 16, 'text-anchor': 'middle' }, svgEl);
+    t.textContent = String(r);
+  }
+  const xl = svg('text', { x: (L + width - R) / 2, y: height - 4, 'text-anchor': 'middle' }, svgEl);
+  xl.textContent = 'matches won before the first loss';
+
+  for (let r = 0; r <= maxR; r++) {
+    const c = mcCounts[r];
+    if (c > 0) {
+      const bar = svg('rect', { x: X(r) - barW / 2, y: Y(c), width: barW, height: base - Y(c), class: `bar${r === TOTAL_ROUNDS ? ' champ' : ''}` }, svgEl);
+      svg('title', {}, bar).textContent = `${fmt(c)} players won ${r}`;
+    }
+    const th = theory(r);
+    if (th >= 1) svg('circle', { cx: X(r), cy: Y(th), r: 3.5, class: 'theory' }, svgEl);
+  }
+
+  const mean = mcCounts.reduce((s, c, r) => s + c * r, 0) / n;
+  const reach10 = mcCounts.slice(10).reduce((a, b) => a + b, 0);
+  const champs = mcCounts[TOTAL_ROUNDS];
+  $('mc-eqs').replaceChildren(
+    eqRow('Average matches won', `simulated {${mean.toFixed(3)}}, theory p/(1 − p) = {${(p / (1 - p)).toFixed(3)}}`),
+    eqRow('Reached 10 wins', `simulated {${fmt(reach10)}}, theory n·p${sup(10)} = {${fmt(n * p ** 10)}}`),
+    eqRow('World champions', `simulated {${fmt(champs)}}, theory n·p${sup(33)} = {${sci(n * p ** TOTAL_ROUNDS)}}`),
+  );
+}
+
+function runMonteCarlo() {
+  mcP = Number($<HTMLInputElement>('mc-p').value) / 100;
+  // Math.random is fine here: this is a statistics demo, and it is much faster than crypto for 10^5+ draws.
+  mcCounts = simulateRuns(mcP, MC_PLAYERS, Math.random);
+  renderMonteCarlo();
+}
+
 // ---------- wiring ----------
 
 function init() {
+  initTheme();
+  watchScoreline();
   document.querySelectorAll<HTMLButtonElement>('.throw').forEach((b) => {
     const move = Number(b.dataset.move) as Move;
     b.querySelector<HTMLElement>('.glyph')!.innerHTML = GLYPHS[move];
@@ -646,14 +1088,7 @@ function init() {
     startGame();
     $('game').scrollIntoView({ behavior: reducedMotion.matches ? 'auto' : 'smooth', block: 'start' });
   });
-  $('share').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(shareText);
-      $('share').textContent = 'Copied';
-    } catch {
-      $('share').textContent = 'Copy failed';
-    }
-  });
+  $('share').addEventListener('click', shareResult);
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if ((e.target as HTMLElement).closest('input, textarea, select')) return;
@@ -671,6 +1106,30 @@ function init() {
   renderMath();
   renderStudies();
   startGame();
+
+  $('sim-run').addEventListener('click', runSim);
+  const mcSlider = $<HTMLInputElement>('mc-p');
+  mcSlider.addEventListener('input', () => {
+    $('mc-p-out').textContent = `${mcSlider.value}%`;
+  });
+  $('mc-run').addEventListener('click', runMonteCarlo);
+  runMonteCarlo();
+  $('sim-step').addEventListener('click', stepSim);
+  $('sim-new').addEventListener('click', newSimField);
+  newSimField();
+
+  let resizeTimer = 0;
+  let lastWidth = innerWidth;
+  addEventListener('resize', () => {
+    if (innerWidth === lastWidth) return;
+    lastWidth = innerWidth;
+    clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      renderCorner(game.phase === 'choose' ? game.round - cornerStart : game.round - cornerStart + 1);
+      renderSim();
+      renderMonteCarlo();
+    }, 150);
+  });
 }
 
 init();

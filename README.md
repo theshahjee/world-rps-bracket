@@ -12,6 +12,9 @@ Each opponent has a name and a country (countries are drawn in proportion to pop
 - The live math for the round: players left N<sub>r</sub> = ⌈8.32×10⁹ / 2<sup>r</sup>⌉, how many are knocked out, the chance a coin-flipper gets this far, and the chance of winning the rest at p = ½.
 - The opponent's model: their conditional response vector (stay, upgrade, downgrade) after their last result, the Shannon entropy of their next throw, KL divergence from uniform, and the match win chance under perfect play (solved by value iteration, since ties replay).
 - Your run: wins, ties, a Laplace estimate of your win rate, and the probability your streak is pure luck.
+- Your corner of the bracket, drawn as a tree. The other players in it play each other with their real profiles, so your next opponent is whoever wins the branch next to yours. Tap any name to see that player's habits and your odds against them.
+- A 32-player bracket you can watch round by round (32 → 16 → 8 → 4 → 2 → 1), stepping one round at a time or playing it out.
+- A Monte Carlo run of 100,000 players at a chosen win rate, plotted against the geometric distribution n·p^r(1 − p).
 - An odds calculator for P(champion) = p³³, plotted on a log scale.
 - A summary of the studies, with the population statistics computed from the data.
 

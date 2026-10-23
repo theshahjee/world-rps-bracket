@@ -22,11 +22,20 @@
     <header class="top">
       <a class="brand" href="#">World RPS Bracket</a>
       <nav aria-label="Sections">
+        <a href="#simulate">Simulation</a>
         <a href="#math">The math</a>
         <a href="#studies">The studies</a>
         <a href="https://github.com/theshahjee/world-rps-bracket" rel="noopener">Source</a>
+        <button type="button" class="theme" id="theme" aria-label="Switch colour theme">◐</button>
       </nav>
     </header>
+
+    <div class="minibar" id="minibar" aria-hidden="true">
+      <span class="mb-round">Round <b id="mb-round">1</b>/33</span>
+      <span class="mb-left"><b id="mb-left">8,320,000,000</b> left</span>
+      <span class="mb-opp" id="mb-opp"></span>
+      <a class="mb-jump" href="#game" tabindex="-1">Back to the match</a>
+    </div>
 
     <main>
       <section class="hero" aria-labelledby="hero-title">
@@ -87,7 +96,18 @@
           </div>
         </section>
 
-        <aside class="ledger" aria-label="Live math for this round">
+        <div class="side">
+        <section class="corner card" aria-labelledby="corner-title">
+          <h2 id="corner-title">Your corner of the bracket</h2>
+          <p class="note" id="corner-note"></p>
+          <div class="corner-svg-wrap">
+            <svg id="corner-svg" class="bracket" role="img" aria-label="Bracket tree for your corner. Players on the left, one column per round, the winner on the right."></svg>
+          </div>
+          <p class="hint">Tap a name to scout that player.</p>
+          <div class="scout" id="corner-scout" hidden></div>
+        </section>
+
+        <aside class="ledger card" aria-label="Live math for this round">
           <h2>This round, in numbers</h2>
           <dl class="eqs" id="eqs"></dl>
           <h3>The opponent's model</h3>
@@ -100,6 +120,7 @@
           <h3>Your run</h3>
           <dl class="eqs" id="run-eqs"></dl>
         </aside>
+        </div>
       </div>
 
       <section class="ladder-wrap" aria-labelledby="ladder-title">
@@ -109,6 +130,46 @@
           Bar length is log<sub>10</sub> of the players still standing after each round.
         </p>
         <ol class="ladder" id="ladder"></ol>
+      </section>
+
+      <section class="sim" id="simulate" aria-labelledby="sim-title">
+        <h2 id="sim-title">Watch a bracket play out</h2>
+        <p class="note sim-intro">
+          32 people play every match with the same model you face, each one copying a real player from the study.
+          Each column halves the field, <span class="math"><var>N</var><sub><var>r</var></sub> = 32 / 2<sup><var>r</var></sup></span>,
+          so 5 rounds crown a winner. The world bracket is this same tree, 33 columns deep.
+        </p>
+        <div class="sim-controls">
+          <button type="button" class="action" id="sim-run">Play it out</button>
+          <button type="button" class="ghost" id="sim-step">Step one round</button>
+          <button type="button" class="ghost" id="sim-new">New field</button>
+          <output id="sim-status" class="sim-status" aria-live="polite"></output>
+        </div>
+        <div class="sim-board">
+          <div class="sim-svg-wrap">
+            <svg id="sim-svg" class="bracket" role="img" aria-label="Simulated 32-player bracket. Players on the left, one column per round, the champion on the right."></svg>
+          </div>
+          <div class="sim-side">
+            <dl class="eqs" id="sim-eqs"></dl>
+            <div class="scout" id="sim-scout" hidden></div>
+            <p class="hint">Tap a name to scout that player.</p>
+          </div>
+        </div>
+
+        <h3 class="mc-title">Monte Carlo: 100,000 players at one win rate</h3>
+        <p class="note">
+          Each simulated player wins each match with probability <var>p</var> and stops at their first loss.
+          Theory says the number who win exactly <var>r</var> matches is
+          <span class="math"><var>n</var> · <var>p</var><sup><var>r</var></sup>(1 − <var>p</var>)</span>, a geometric distribution.
+          The bars are the simulation and the dots are the formula.
+        </p>
+        <div class="mc-controls">
+          <label for="mc-p">Win rate <var>p</var> = <output id="mc-p-out">60%</output></label>
+          <input type="range" id="mc-p" min="50" max="95" step="1" value="60" />
+          <button type="button" class="action" id="mc-run">Simulate 100,000 players</button>
+        </div>
+        <div class="mc-chart-wrap"><svg id="mc-chart" class="mc-chart" role="img" aria-label="Histogram of rounds won by simulated players, log scale, with the theoretical geometric distribution."></svg></div>
+        <dl class="eqs mc-eqs" id="mc-eqs"></dl>
       </section>
 
       <section class="math-sec" id="math" aria-labelledby="math-title">
@@ -233,6 +294,7 @@
       <h2 id="end-title"></h2>
       <p id="end-body"></p>
       <dl class="eqs" id="end-eqs"></dl>
+      <textarea class="share-text" id="share-text" readonly rows="3" aria-label="Result text to copy" hidden></textarea>
       <div class="end-actions">
         <button type="button" id="share">Copy result</button>
         <button type="button" id="again" class="primary">Enter the bracket again</button>

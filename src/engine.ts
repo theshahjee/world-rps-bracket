@@ -74,6 +74,42 @@ export function opponentMove(state: OpponentState, firstMoves: Triple, rng: Rng)
   return sample(predict(state.profile, state.lastMove, state.lastOutcome), rng);
 }
 
+export interface MatchResult {
+  winner: 0 | 1;
+  winningMove: Move;
+  throws: number; // including replayed ties
+}
+
+/** Two modelled players face each other; ties replay with each side's tie habits. */
+export function simulateMatch(a: OpponentState, b: OpponentState, firstMoves: Triple, rng: Rng): MatchResult {
+  const sa = { ...a };
+  const sb = { ...b };
+  for (let throws = 1; ; throws++) {
+    const ma = opponentMove(sa, firstMoves, rng);
+    const mb = opponentMove(sb, firstMoves, rng);
+    const result = outcomeOf(ma, mb);
+    if (result === 'win') return { winner: 0, winningMove: ma, throws };
+    if (result === 'lose') return { winner: 1, winningMove: mb, throws };
+    sa.lastMove = ma;
+    sb.lastMove = mb;
+    sa.lastOutcome = sb.lastOutcome = 'tie';
+  }
+}
+
+/**
+ * Monte Carlo: how many rounds each of `players` simulated entrants wins before losing,
+ * at a fixed match win rate. Returns counts indexed by rounds won (0..rounds).
+ */
+export function simulateRuns(winRate: number, players: number, rng: Rng, rounds = TOTAL_ROUNDS): number[] {
+  const counts = new Array<number>(rounds + 1).fill(0);
+  for (let i = 0; i < players; i++) {
+    let won = 0;
+    while (won < rounds && rng() < winRate) won++;
+    counts[won]++;
+  }
+  return counts;
+}
+
 /** Odds of winning `rounds` independent matches in a row at a fixed per-match win rate. */
 export function championOdds(winRate: number, rounds = TOTAL_ROUNDS): number {
   return winRate ** rounds;
