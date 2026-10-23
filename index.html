@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>World RPS Bracket</title>
+    <meta
+      name="description"
+      content="Everyone on Earth enters one rock paper scissors bracket. Win 33 games in a row against opponents built from real human play data."
+    />
+    <meta name="theme-color" content="#f3f6fa" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231e4fd8'/%3E%3Ctext x='16' y='22' font-family='Arial' font-weight='700' font-size='14' text-anchor='middle' fill='%23fff'%3E2%E2%81%BB%C2%B3%C2%B3%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <a class="skip" href="#game">Skip to the game</a>
+    <header class="top">
+      <a class="brand" href="#">World RPS Bracket</a>
+      <nav aria-label="Sections">
+        <a href="#math">The math</a>
+        <a href="#studies">The studies</a>
+        <a href="https://github.com/theshahjee/world-rps-bracket" rel="noopener">Source</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <h1 id="hero-title">
+          8,320,000,000 people enter one rock paper scissors bracket.
+          <span class="hero-sub">You have to win 33 in a row.</span>
+        </h1>
+        <p class="lede">
+          Half the field goes home every round, since <span class="math"><var>n</var> = ⌈log<sub>2</sub> 8.32×10<sup>9</sup>⌉ = 33</span>.
+          Your opponents don't throw at random. Each one copies the habits of a real person measured in a
+          300-round lab study, so if you spot the patterns you can beat the odds.
+        </p>
+      </section>
+
+      <div class="arena" id="game">
+        <section class="board" aria-label="Current match">
+          <div class="scoreline">
+            <div class="round">
+              <span class="label">Round</span>
+              <span class="round-num"><span id="round-num">1</span><span class="of"> of 33</span></span>
+            </div>
+            <div class="left">
+              <span class="label">Players left</span>
+              <output id="players-left" class="count">8,320,000,000</output>
+            </div>
+          </div>
+          <div class="progress" aria-hidden="true"><span id="progress-bar"></span></div>
+
+          <div class="opponent" id="opponent" aria-live="polite">
+            <p class="opp-kicker" id="opp-kicker">Your first opponent</p>
+            <p class="opp-name"><span id="opp-flag" class="flag"></span><span id="opp-name"></span></p>
+            <p class="opp-from" id="opp-from"></p>
+            <p class="opp-last" id="opp-last"></p>
+          </div>
+
+          <div class="stage" id="stage" aria-hidden="true">
+            <div class="hand" id="hand-you"><span class="who">You</span><span class="glyph" id="glyph-you"></span></div>
+            <span class="vs">vs</span>
+            <div class="hand" id="hand-them"><span class="who" id="who-them">Them</span><span class="glyph" id="glyph-them"></span></div>
+          </div>
+
+          <p class="verdict" id="verdict" role="status" aria-live="polite"></p>
+
+          <div class="throws" id="throws" role="group" aria-label="Choose your throw">
+            <button class="throw" data-move="0" type="button"><span class="glyph"></span>Rock<kbd>R</kbd></button>
+            <button class="throw" data-move="1" type="button"><span class="glyph"></span>Paper<kbd>P</kbd></button>
+            <button class="throw" data-move="2" type="button"><span class="glyph"></span>Scissors<kbd>S</kbd></button>
+          </div>
+          <button class="next" id="next" type="button" hidden></button>
+
+          <label class="assist">
+            <input type="checkbox" id="assist" />
+            Show the model's prediction for this opponent
+          </label>
+          <div class="prediction" id="prediction" hidden>
+            <p class="pred-title">Predicted next throw</p>
+            <div class="bars" id="pred-bars"></div>
+          </div>
+        </section>
+
+        <aside class="ledger" aria-label="Live math for this round">
+          <h2>This round, in numbers</h2>
+          <dl class="eqs" id="eqs"></dl>
+          <h3>The opponent's model</h3>
+          <p class="note">
+            Conditional response vector after their last result, as
+            (<var>stay</var>, <var>upgrade</var>, <var>downgrade</var>). Upgrade means switching to the throw that
+            beats their own last one.
+          </p>
+          <dl class="eqs" id="model-eqs"></dl>
+          <h3>Your run</h3>
+          <dl class="eqs" id="run-eqs"></dl>
+        </aside>
+      </div>
+
+      <section class="ladder-wrap" aria-labelledby="ladder-title">
+        <h2 id="ladder-title">The bracket, round by round</h2>
+        <p class="note">
+          <span class="math"><var>N</var><sub><var>r</var></sub> = ⌈8.32×10<sup>9</sup> / 2<sup><var>r</var></sup>⌉</span>.
+          Bar length is log<sub>10</sub> of the players still standing after each round.
+        </p>
+        <ol class="ladder" id="ladder"></ol>
+      </section>
+
+      <section class="math-sec" id="math" aria-labelledby="math-title">
+        <h2 id="math-title">The math</h2>
+        <div class="math-grid">
+          <div class="prose">
+            <p>
+              Ties replay, so every match ends in a win or a loss. If you win each match with probability
+              <var>p</var>, and the matches are independent, the chance of winning all 33 is
+            </p>
+            <p class="display-eq">P(champion) = <var>p</var><sup>33</sup></p>
+            <p>
+              At <var>p</var> = ½ that is 2<sup>−33</sup> ≈ 1.16×10<sup>−10</sup>, or 1 in 8.59 billion. That is
+              slightly worse than 1 in 8.32 billion, because 2<sup>33</sup> = 8,589,934,592 is the bracket size
+              once you pad the field with byes.
+            </p>
+            <p>
+              The exponent does all the work. Small edges per match compound into huge differences at the end,
+              because log P = 33 · log <var>p</var>. Going from 50% to 60% multiplies your odds by
+              1.2<sup>33</sup> ≈ 412.
+            </p>
+          </div>
+          <div class="calc">
+            <label for="p-slider" class="calc-label">
+              Win rate per match, <var>p</var> = <output id="p-out">60.0%</output>
+            </label>
+            <input type="range" id="p-slider" min="34" max="95" step="0.5" value="60" />
+            <p class="calc-result">
+              <span class="math"><var>p</var><sup>33</sup></span> = <output id="p-pow"></output>
+              <span class="calc-oneIn">1 in <output id="p-onein"></output></span>
+            </p>
+            <figure class="chart">
+              <svg id="odds-chart" viewBox="0 0 560 300" role="img" aria-labelledby="chart-title chart-desc">
+                <title id="chart-title">Championship odds against win rate</title>
+                <desc id="chart-desc">Log scale. The odds rise from 1 in 8.6 billion at 50% to better than 1 in 20 at 92%.</desc>
+              </svg>
+              <figcaption>
+                Odds of winning 33 straight, on a log scale. Marked points come from this page's own analysis.
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="odds-table" id="odds-table">
+            <caption>Selected win rates</caption>
+            <thead>
+              <tr><th scope="col">Per-match win rate <var>p</var></th><th scope="col"><var>p</var><sup>33</sup></th><th scope="col">Odds</th><th scope="col">Where it comes from</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="studies" id="studies" aria-labelledby="studies-title">
+        <h2 id="studies-title">What the studies found</h2>
+        <div class="study-grid">
+          <article class="study">
+            <h3>Wang, Xu &amp; Zhou (2014), Scientific Reports</h3>
+            <p>
+              360 students at Zhejiang University played 300 rounds each, in 60 groups of six, for real cash.
+              Overall they threw rock, paper and scissors at 36%, 33% and 32%, close to the
+              ⅓-⅓-⅓ Nash equilibrium. Their throws from one round to the next were not independent, though.
+              Winners repeated their throw more often than they switched. For most payoff settings, losers
+              tended to shift "clockwise" (R→S, S→P, P→R), meaning they switched to the throw that loses to the one they just played.
+            </p>
+            <p>
+              The authors call this a win-lose-tie conditional response model and show it predicts the
+              persistent cycling they saw across whole groups.
+            </p>
+          </article>
+          <article class="study">
+            <h3>Brockbank &amp; Vul (2021), Games</h3>
+            <p>
+              Pairs of people played up to 300 rounds against the same opponent. This game's opponents are built from
+              that data set: <strong id="ds-players"></strong> players, <strong id="ds-throws"></strong> throws.
+              For each player with at least 100 rounds, we measured how they responded to a win, a tie and a
+              loss, then smoothed each row toward the population average with 6 pseudo-observations.
+            </p>
+            <p>
+              The population averages are below. The strongest signal is after a loss: people stayed only
+              <strong id="ds-lose-stay"></strong> of the time, well below the ⅓ you'd expect from random play.
+              Win-stay is much weaker here than in the 2014 study. The real edge comes from individual
+              players, who differ a lot.
+            </p>
+          </article>
+        </div>
+
+        <figure class="cr-figure">
+          <div class="cr-chart" id="cr-chart"></div>
+          <figcaption>
+            Population conditional response, Brockbank &amp; Vul data. The dashed line marks ⅓, what random play would give.
+          </figcaption>
+        </figure>
+
+        <div class="findings" id="findings"></div>
+
+        <h3 class="refs-title">Sources</h3>
+        <ol class="refs">
+          <li>
+            Wang, Z., Xu, B. &amp; Zhou, H.-J. (2014). Social cycling and conditional responses in the
+            Rock-Paper-Scissors game. <em>Scientific Reports</em> 4, 5830.
+            <a href="https://doi.org/10.1038/srep05830" rel="noopener">doi:10.1038/srep05830</a>
+          </li>
+          <li>
+            Brockbank, E. &amp; Vul, E. (2021). Formalizing opponent modeling with the rock, paper, scissors
+            game. <em>Games</em> 12(3), 70.
+            <a href="https://doi.org/10.3390/g12030070" rel="noopener">doi:10.3390/g12030070</a>.
+            Data: <a href="https://github.com/erik-brockbank/rps-dyads" rel="noopener">github.com/erik-brockbank/rps-dyads</a>
+          </li>
+          <li>
+            Zhang, H., Moisan, F. &amp; Gonzalez, C. (2021). Rock-Paper-Scissors play: Beyond the
+            win-stay/lose-change strategy. <em>Games</em> 12(3), 52.
+            <a href="https://doi.org/10.3390/g12030052" rel="noopener">doi:10.3390/g12030052</a>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <dialog class="end" id="end-dialog" aria-labelledby="end-title">
+      <p class="end-kicker" id="end-kicker"></p>
+      <h2 id="end-title"></h2>
+      <p id="end-body"></p>
+      <dl class="eqs" id="end-eqs"></dl>
+      <div class="end-actions">
+        <button type="button" id="share">Copy result</button>
+        <button type="button" id="again" class="primary">Enter the bracket again</button>
+      </div>
+    </dialog>
+
+    <footer class="foot">
+      <p>
+        Open source, MIT licensed. Opponent behaviour is derived from published research data. Names are made up.
+      </p>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
